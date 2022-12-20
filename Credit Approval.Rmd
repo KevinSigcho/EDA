@@ -1,0 +1,633 @@
+---
+title: "Caso Práctico Final"
+output:
+  html_notebook: default
+  pdf_document: default
+  html_document: default
+---
+
+Tomaremos el dataset de aprobación de crédito bancario en https://archive.ics.uci.edu/ml/datasets/Credit+Approval . Los datos también se pueden cargar de la carpeta de contenido en  `crx.data`. La información del dataset está en https://archive.ics.uci.edu/ml/machine-learning-databases/credit-screening/crx.names y expone lo siguiente:
+
+      1. Title: Credit Approval
+
+      2. Sources: 
+          (confidential)
+          Submitted by quinlan@cs.su.oz.au
+      
+      3.  Past Usage:
+      
+          See Quinlan,
+          * "Simplifying decision trees", Int J Man-Machine Studies 27,
+            Dec 1987, pp. 221-234.
+          * "C4.5: Programs for Machine Learning", Morgan Kaufmann, Oct 1992
+        
+      4.  Relevant Information:
+      
+          This file concerns credit card applications.  All attribute names
+          and values have been changed to meaningless symbols to protect
+          confidentiality of the data.
+        
+          This dataset is interesting because there is a good mix of
+          attributes -- continuous, nominal with small numbers of
+          values, and nominal with larger numbers of values.  There
+          are also a few missing values.
+        
+      5.  Number of Instances: 690
+      
+      6.  Number of Attributes: 15 + class attribute
+      
+      7.  Attribute Information:
+      
+          A1:	b, a.
+          A2:	continuous.
+          A3:	continuous.
+          A4:	u, y, l, t.
+          A5:	g, p, gg.
+          A6:	c, d, cc, i, j, k, m, r, q, w, x, e, aa, ff.
+          A7:	v, h, bb, j, n, z, dd, ff, o.
+          A8:	continuous.
+          A9:	t, f.
+          A10:	t, f.
+          A11:	continuous.
+          A12:	t, f.
+          A13:	g, p, s.
+          A14:	continuous.
+          A15:	continuous.
+          A16: +,-         (class attribute)
+      
+      8.  Missing Attribute Values:
+          37 cases (5%) have one or more missing values.  The missing
+          values from particular attributes are:
+      
+          A1:  12
+          A2:  12
+          A4:   6
+          A5:   6
+          A6:   9
+          A7:   9
+          A14: 13
+      
+      9.  Class Distribution
+        
+          +: 307 (44.5%)
+          -: 383 (55.5%)
+
+# Actividades a realizar
+
+1. Carga los datos. Realiza una inspección por variables de la distribución de aprobación de crédito en función de cada atributo visualmente. Realiza las observaciones pertinentes. ¿ Qué variables son mejores para separar los datos?
+
+2. Prepara el dataset convenientemente e imputa los valores faltantes usando la librería `missForest`
+
+3. Divide el dataset tomando las primeras 590 instancias como train y las últimas 100 como test.
+
+4. Entrena un modelo de regresión logística con regularización Ridge y Lasso en train seleccionando el que mejor **AUC** tenga. Da las métricas en test.
+
+5. Aporta los *log odds* de las variables predictoras sobre la variable objetivo.
+
+6. Si por cada verdadero positivo ganamos 100e y por cada falso positivo perdemos 20e. ¿Qué valor monetario generará el modelo teniendo en cuénta la matriz de confusión del modelo con mayor AUC (con las métricas en test)?
+
+
+## Paquetes empleados
+
+```{r}
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+library(fastDummies)
+library(missForest)
+library(corrplot)
+library(glmnet)
+library(caret)
+library(lattice)
+library(e1071)
+library(MASS) 
+library(PerformanceAnalytics)
+```
+
+# 1. Carga los datos. Realiza una inspección por variables de la distribución de aprobación de crédito en función de cada atributo visualmente. Realiza las observaciones pertinentes. ¿ Qué variables son mejores para separar los datos?
+
+## Carga de fichero de datos
+
+```{r}
+url <- 'https://archive.ics.uci.edu/ml/machine-learning-databases/credit-screening/crx.data'
+data <- read.csv(url, sep = ",", header = F)
+```
+Inspeccionamos las variables que tenemos y asignamos el nombre de cada una de las variables de acuerdo a la bibliografía (Khaneja, Deepesh. (2017). Credit Approval Analysis using R.). Además convertimos en binaria la variable objetivo Approved.
+```{r}
+colnames(data) = c("Male", "Age", "Debt", "Married", "BankCustomer", "EducationLevel", "Ethnicity", "YearsEmployed", "PriorDefault", "Employed", "CreditScore", "DriversLicense", "Citizen", "ZipCode", "Income", "Approved")
+
+head(data)
+str(data)
+summary(data)
+
+data <- data %>% 
+    mutate(Approved = recode(Approved, 
+                      "+" = "1", 
+                      "-" = "0")) 
+```
+
+A continuación realizamos una inspeccion visual de cada una de las variables en función de la variable de aprovación del crédito ("Approved"). 
+
+```{r}
+explain.target <- function(dataframe.object, target.feature){
+  
+  for (columna in 1:ncol(dataframe.object)){
+    
+    if (names(dataframe.object[columna]) == "Approved"){
+      next 
+      
+    } else {
+      if (class(dataframe.object[,columna]) == "factor"){
+        plot <- ggplot(dataframe.object) +
+          geom_bar(aes(dataframe.object[,columna], fill = as.factor(target.feature))) + 
+          labs(title = paste(names(dataframe.object[columna]), "- Approved")) + 
+          xlab(names(dataframe.object[columna]))+
+          ylab("Frecuencia") + 
+          scale_fill_discrete(name="Crédit Approved", breaks=c("0","1"),
+                              labels=c("NO","YES"))
+      } 
+      
+      else if (class(dataframe.object[,columna]) == "character"){
+        plot <- ggplot(dataframe.object) +
+          geom_bar(aes(dataframe.object[,columna], fill = as.factor(target.feature))) + 
+          labs(title = paste(names(dataframe.object[columna]), "- Approved")) + 
+          xlab(names(dataframe.object[columna]))+
+          ylab("Frecuencia") + 
+          scale_fill_discrete(name="Crédit Approved", breaks=c("0","1"),
+                              labels=c("NO","YES"))
+      } 
+      
+      else {
+        plot <- ggplot(dataframe.object) +
+          geom_boxplot(aes(dataframe.object[,columna], fill = as.factor(target.feature)))+
+          coord_flip()+
+          labs(title=paste(names(dataframe.object[columna]), "- Approved"))+
+          xlab(names(dataframe.object[columna])) + 
+          scale_fill_discrete(name =" Approved", breaks=c("0","1"),
+                              labels=c("NO","YES"))
+      }
+      
+      
+      plot <- print(plot)
+    }
+  }
+}
+
+explain.target(dataframe.object = data, target.feature = data$Approved)
+```
+Las observaciones se pueden dividir en dos:
+
+- **Variables continuas**: Se distribuyen de una manera similar en todos los caos, no obstante revisaremos esto más adelante ya que en el caso de CreditScore los valores outliers no nos permiten apreciar diferencias.
+
+- **Variables discretas**: Se observan valores faltanes ("?") que se eliminaran. Las variables "Married", "BankCustomer" y "Citizen" tienen valores que siempre obtienen el crédito bancario por lo que son buenas para separar datos. La variable PriorDefault contiene para su valor "t" una mayor cantidad de créditos concedidos mientras que para su valor "f" lo contrario.
+
+# 2. Prepara el dataset convenientemente e imputa los valores faltantes usando la librería `missForest`
+
+Se observa que algunas variables como Male, Married, BankCostumer, Education level y Ethnicity que poseen valores designados como "?".Dichos valores se transforman en valores nulos en todo el dataset.
+```{r}
+data[data == "?"] <- NA
+```
+Ahora prepararemos el dataset e imputaremos valores empleando para ello la librería MissForest
+
+```{r}
+sapply(data, function(x) sum(is.na(x))); sum(sapply(data, function(x) sum(is.na(x))))
+```
+Se convierten en factor las variables chr para poder aplicar MissForest
+```{r}
+data <- type.convert(data, as.is=FALSE)
+
+data.i <- missForest(as.data.frame(data))
+data <- data.i$ximp
+```
+Comprobamos que los valores Nulos han desaparecido
+```{r}
+sapply(data, function(x) sum(is.na(x)))
+```
+```{r}
+summary(data)
+```
+## Analisis Exploratorio de Datos
+
+La variable ZipCode vemos que tiene 183 variables diferentes las cuales no son numéricas sino categóricas por lo que se decide prescindir de esta variable antes de continuar con el análisis.
+
+```{r}
+unique(data$ZipCode)
+data = subset(data, select = -ZipCode)
+```
+Se convierten las variables: Male, PriorDefault, Employed y DriverLicense a variables del tipo factor binario.
+```{r}
+data <- data %>% 
+  mutate(Male = recode(Male,
+         "a"="1",
+         "b"="0",))
+
+data$PriorDefault <- as.factor(data$PriorDefault)
+data <- data %>% 
+  mutate(PriorDefault = recode(PriorDefault,
+         "t"="No",
+         "f"="Yes"))
+
+data$Employed <- as.factor(data$Employed)
+data <- data %>% 
+  mutate(Employed = recode(Employed,
+         "t"="Employed",
+         "f"="Unemployed"))
+
+data$DriversLicense <- as.factor(data$DriversLicense)
+data <- data %>% 
+  mutate(DriversLicense = recode(DriversLicense,
+         "t"="1",
+         "f"="0"))
+data$Approved <- as.character(data$Approved)
+str(data)
+summary(data)
+```
+
+### Se realiza una nueva observación de los datos con los cambios realizados
+
+#### Variables Categóricas vs Variable Objetivo (Approved)
+
+##### **Male vs Approved**
+
+```{r}
+ggplot(data = data, aes(x = Male, fill = Approved)) +
+  geom_bar(position = "fill") +
+  labs(y = "Rate", x = 'Male') + ggtitle('Male vs Approved')
+```
+
+Parece que el género masculino tiene una mayor proporción de aprobaciones que el género femenino, pero la diferencia entre ambos índices no parece ser tan significativa, se seguirá estudiando si esto afecta a la obtención de un crédito más adelante.
+
+##### **Married vs Approved**
+```{r}
+
+ggplot(data = data, aes(x = Married, fill = Approved)) +
+  geom_bar() +
+  labs(y = "Rate", x = 'Married') + ggtitle('Married vs Approved')
+```
+En este caso se ve una clara diferencia entre el estado civil de una persona y la posibilidad de obtener un crédito bancario. Cabe destacar que para el estado civil 'l' la aprobación del crédito es total, esto pude deberse a que la muestra es demasiado pequeña y todas las personas con ese estado civil consiguieron el préstamo. Se comprueba de la siguiente manera:
+```{r}
+data %>% 
+  group_by(Married) %>% 
+  count()
+```
+Se ve que apenas dos personas están clasificadas como 'l' dentro de la variable Married con lo que queda explicada la anomalía de tener un 100% de créditos aprobados en este caso.
+
+##### **Bank Custumer vs Approved**
+```{r}
+ggplot(data = data, aes(x = BankCustomer, fill = Approved)) +
+  geom_bar() +
+  labs(y = "Rate", x = 'Bank Customer') + ggtitle('Bank Customer vs Approved')
+```
+
+En este caso vemos una correlación entre los estados de los clientes bancarios y la tasa de aprobación de un crédito. Aunque nuevamente vemos que para la categoría 'gg' obtenemos un 100% de tasa de aprobación, asi que se estudiara el tamaño de la muestra:
+
+```{r}
+data %>% 
+  group_by(BankCustomer) %>% 
+  count()
+```
+De nuevo vemos que hay solo dos personas en esta categoría y que a la vez obtuvieron el préstamo explicando así esa tasa de 100% de aprobación 
+
+##### **Education level vs Approved**
+```{r}
+ggplot(data = data, aes(x = EducationLevel, fill = Approved)) +
+  geom_bar() +
+  labs(y = "Rate", x = 'Education Level') + ggtitle('Education Level vs Approved')
+```
+Se aprecia que el nivel de eduación también afecta a nuestra variable objetivo, para el nivel "x" y "cc" hay una mayor tasa de aprobación que para los niveles "ff" y "d". 
+
+##### **Ethnicity vs Approved**
+```{r}
+ggplot(data = data, aes(x = Ethnicity, fill = Approved)) +
+  geom_bar() +
+  labs(y = "Rate", x = 'Ethnicity') + ggtitle('Ethnicity vs Approved')
+```
+La etnia de una persona aparentemente afecta a la probabilidad de obtener un prestamos, los individuos etiquetados como "ff" tienen menos opciones de obtener un préstamo que los etiquetados como "z".
+
+##### **Prior Default vs Approved**
+```{r}
+ggplot(data = data, aes(x = PriorDefault, fill = Approved)) +
+  geom_bar(position = "fill") +
+  labs(y = "Rate", x = 'Prior Default') + ggtitle('Prior Default vs Approved')
+```
+Se ve claramente que aquellos clientes que no han cumplido con sus pagos tiene muy pocas opciones de conseguir un nuevo crédito.
+
+
+##### **Employed vs Approved**
+```{r}
+ggplot(data = data, aes(x = Employed, fill = Approved)) +
+  geom_bar(position = "fill") +
+  labs(y = "Rate", x = 'Employed') + ggtitle('Employed vs Approved')
+```
+Como es lógico cabe esperar que las personas con trabajo tengan más opciones de obtener un préstamo
+
+
+##### **DriversLicense vs Approved**
+```{r}
+ggplot(data = data, aes(x = DriversLicense, fill = Approved)) +
+  geom_bar(position = "fill") +
+  labs(y = "Rate", x = 'Drivers License') + ggtitle('Drivers License vs Approved')
+```
+En este caso no parece haber una relación entre ambas variables.
+
+##### **Citizen vs Approved**
+```{r}
+ggplot(data = data, aes(x = Citizen, fill = Approved)) +
+  geom_bar(position = "fill") +
+  labs(y = "Rate", x = 'Citizenship') + ggtitle('Citizenship vs Approved')
+```
+Parece haber alguna relación entre estas dos variables.
+
+#### Test de independencia de las variables categóricas frente a la variable objetivo
+
+Para comprobar si existe independencia entre las diferentes variables categóricas y la variable objetivo, comprobaremos el chi-cuadrado con un nivel de significancia del 95%, la siguiente función imprimirá el nombre de la variable y los p-valores resultantes.
+```{r}
+categoricVars <- data %>% dplyr::select(Male, Married, BankCustomer, EducationLevel,
+                                       Ethnicity, PriorDefault, Employed, DriversLicense,
+                                       Citizen) 
+
+sapply(categoricVars, 
+       function(x) round(chisq.test(table(x, data$Approved))$p.value,2))
+```
+Las variables Married, BankCustomer, EducationLevel, Ethnicity, PriorDefault y Employed son dependientes de la variable objetivo. Mientras que Male y DriversLicense son independientes. Por tanto, eliminaremos estas dos últimas variables de nuestro modelo.
+
+#### Variables numéricas vs Variable Objetivo
+
+
+##### **Age vs Approved**
+```{r}
+data$Approved <- as.factor(data$Approved)
+cdplot(data$Approved ~ data$Age, main = "Age vs Approved", 
+       xlab = "Age", ylab = "Conditional Density" ) 
+```
+El gráfico muestra cómo los que tienen más edad (60) tienen más posibilidades de que les aprueben el crédito, aunque cuando se llega al umbral de los 75 años parece que la probabilidad baja drásticamente. Para más información se realiza un diagrama de cajas:
+
+```{r}
+ggplot(data, aes(x= Approved, y= Age, fill= Approved)) +
+geom_boxplot() +
+labs(y = "Age", x = 'Approved') + ggtitle('Age vs Approved') +
+scale_fill_brewer(palette = "Set2")
+```
+Como se ha visto en el gráfico anterior parece haber una cierta correlación entre la edad y la tasa de aprobación, a más edad podrias tener mayor facilidad para conseguir un crédito.
+
+##### **Debt vs Approved**
+```{r}
+cdplot(data$Approved ~ data$Debt, main = "Debt vs Approved", 
+       xlab = "Debt", ylab = "Conditional Density" ) 
+```
+La gráfica describe una relación entre la deuda y la aprobación del crédito en la que cuanto más deuda tienes más posibilidades tienes de conseguir un crédito, aunque parece bajar alrededor del 26 en el eje de la Deuda para luego volver a subir. 
+```{r}
+ggplot(data, aes(x= Approved, y= Debt, fill= Approved)) +
+geom_boxplot() +
+labs(y = "Debt", x = 'Approved') + 
+  ggtitle('Debt vs Approved') +
+scale_fill_brewer(palette = "Set2")
+```
+El grafico de cajas parece indicar lo mismo descrito antes.
+
+##### **Years Employed vs Approved**
+```{r}
+ggplot(data, aes(x= Approved, y= YearsEmployed, fill= Approved)) +
+geom_boxplot() +
+labs(y = "Years Employed", x = 'Approved') + 
+  ggtitle('Years Employed vs Approved') +
+scale_fill_brewer(palette = "Set2")
+```
+Parece haber una correlación positiva entre los años trabajados y la aprobación del crédito.
+
+
+##### **Credit Score vs Approved**
+```{r}
+ggplot(data, aes(x= Approved, y= CreditScore, fill= Approved)) +
+geom_boxplot() +
+labs(y = "Credit Score", x = 'Approved') + 
+  ggtitle('Credit Score vs Approved') +
+scale_fill_brewer(palette = "Set2")
+```
+De nuevo se aprecia una correlación positiva entre ambas variables 
+
+## Income vs Approved
+```{r}
+ggplot(data, aes(x= Approved, y= Income, fill= Approved)) +
+geom_boxplot() +
+labs(y = "Income", x = 'Approved') + 
+  ggtitle('Income vs Approved') +
+scale_fill_brewer(palette = "Set2") 
+```
+Este gráfico contiene una gran cantidad de valores atípicos extremos, por lo que para apreciar la gráfica hacemos un zoom:
+```{r}
+ggplot(data, aes(x= Approved, y= Income, fill= Approved)) +
+geom_boxplot() +
+labs(y = "Income", x = 'Approved') + 
+  ggtitle('Income vs Approved') +
+scale_fill_brewer(palette = "Set2") +
+  coord_cartesian(ylim=c(0, 1500)) #zoom
+```
+El gráfico muestra una correlación positiva entre las variables Income y Approved.
+
+#### Matriz de correlación
+
+Ahora determinaremos una matriz de correlación para verificar si existe colinealidad entre las variables numéricas.
+```{r}
+numericVars <- data.frame(data$Age, data$Debt, data$YearsEmployed, data$CreditScore, data$Income)
+#corrplot(cor(numericVars), method = "number", type="upper")
+chart.Correlation(numericVars, histogram=TRUE, pch=19)
+```
+El valor más grande es 0.4 entre Años empleados y Edad, este valor no es tan grande como para causar colinealidad, por lo que ambas variables se incluirán en nuestro modelo. 
+
+#### Normalización de las variables numéricas
+
+Primero comprobamos si nuestras variables numéricas siguen una distribución normal.
+```{r}
+for (columna in 1:ncol(data)){
+  if (class(data[,columna]) != "factor"){
+    qqnorm(data[,columna], 
+         main = paste("Normality Plot: ", colnames(data[columna])))
+    qqline(data[,columna])
+  } else {
+    next
+  }
+}
+```
+Ninguna de las variables parecen tener una distribución normal pero vamos a comprobarlo con la prueba de Shapiro.
+
+```{r}
+sapply(numericVars, function(x) round(shapiro.test(x)$p.value,2))
+```
+Los valores de p obtenidos en la prueba de Shapiro son cercanos a 0, rechazamos la hipótesis nula de que existe normalidad en todos los casos, por lo que aceptamos la hipótesis alternativa de que ninguna de las variables tiene una distribución normal.
+
+### Conclusiones del Análisis Exploratorio de Datos:
+
+- Necesitamos normalizar todas las variables numéricas.
+
+- No hay colinealidad entre las variables numéricas.
+
+- Las variables categóricas "Male" y "DriversLicense" no parecen influir en la variable objetivo, el resto sí lo hace en diferente medida.
+
+- Las categorías 'l' y 'gg' de las variables "Married" y "BankCustomer" respectivamente, solo tienen dos observaciones cada una, y se les otorgó crédito en todos los casos. Por lo tanto, se supone que ambas variables son variables binarias, por lo que deberíamos eliminarlos de nuestro modelo.
+
+### Modificación de los datos
+
+#### Normalización de las variables numéricas:
+```{r}
+data$Age <- scale(data$Age)
+data$Debt <- scale(data$Debt)
+data$YearsEmployed <- scale(data$YearsEmployed)
+data$CreditScore <- scale(data$CreditScore)
+data$Income <- scale(data$Income)
+```
+#### Eliminamos las variables Male y DriversLicense
+```{r}
+data$Male <- NULL
+data$DriversLicense <- NULL
+```
+Ya que nuestros datos tienen variables categóricas, debemos tratarlas como dummies en un modelo de clasificación, por lo que definiremos un nuevo dataframe con variables dummies. Además, se eliminan la categoría "l" de Married y "gg" de BankCustomer.
+```{r}
+df <- dummy_cols(data, remove_selected_columns = T)
+colnames(df)
+
+df$Approved_0 <- NULL
+df$Approved_1 <- NULL
+
+
+df$Married_l <- NULL
+df$BankCustomer_gg <- NULL
+
+df$Approved <- data$Approved
+
+summary(df)
+dim(df)
+head(df)
+```
+
+### Modelo de selección de variables
+
+Se realizará un modelo de selección de variables basado en stepAIC, en primer lugar definimos el modelo mínimo y máximo, donde el mínimo será la variable objetivo(Approved) contra sí mismo y el valor máximo la variable objetivo contra todas las variables:
+
+```{r}
+fit1 <- glm(Approved~., data=df, family=binomial)
+
+fit0 <- glm(Approved~1, data=df, family=binomial)
+
+step <-stepAIC(fit0,direction="both",scope=list(upper=fit1,lower=fit0)) 
+```
+Con un AIC 444.75 escogemos las siguiente variables aplicando el comando formula:
+
+```{r}
+step$formula
+```
+Selecionamos las variables indicadas en el paso anterior:
+
+```{r}
+df <- df[c("Approved","PriorDefault_No","CreditScore","Income","Citizen_p","EducationLevel_x","Married_y","EducationLevel_cc","EducationLevel_ff","Employed_Unemployed","Married_u","EducationLevel_w","Ethnicity_n","Ethnicity_h")] 
+```
+
+
+# 3. Divide el dataset tomando las primeras 590 instancias como train y las últimas 100 como test.
+```{r}
+X <- data.matrix(subset(df, select= - Approved))
+Y <- as.double(as.matrix(df$Approved))
+
+# TRAIN
+X_Train <- X[0:590,]
+Y_Train <- Y[0:590]
+
+# TEST
+X_Test <- X[591:nrow(X), ]
+Y_Test <- Y[591:length(Y)]
+
+```
+
+# 4. Entrena un modelo de regresión logística con regularización Ridge y Lasso en train seleccionando el que mejor **AUC** tenga. Da las métricas en test.
+
+Tenemos un problema de clasificación binaria (ya sea para aprobar crédito o no), por eso crearemos un modelo de Regresión Logística.
+
+Necesitamos crear un modelo capaz de predecir si aprobar o no un crédito de la mejor manera posible, pero también debemos minimizar el número de falsos positivos, ya que los falsos positivos harían que nuestro banco perdiera dinero otorgando créditos que no debería. Por esa razón, usaremos el Área bajo la curva (ROC) (AUC) como nuestro estimador.
+
+ROC es un gráfico de la tasa de falsos positivos (eje x) frente a la tasa de verdaderos positivos (eje y) para varios valores de umbral candidatos diferentes entre 0,0 y 1,0, por lo que el área debajo de esta curva sería el mejor estimador posible cuando se trata de obtener buenas predicciones y minimizar los falsos positivos al mismo tiempo.
+
+Para obtener mejores resultados, usaremos también una regularización, ya sea para usar Lasso o Ridge, usaremos un modelo Elastic-Net para eso.
+
+### MODELO RIDGE
+```{r}
+cv.ridge <- cv.glmnet(X_Train, Y_Train, family='binomial', alpha=0, parallel=TRUE, standardize=TRUE, type.measure='auc')
+
+plot(cv.ridge)
+
+coef(cv.ridge, s=cv.ridge$lambda.min)
+```
+
+
+### MODELO LASSO
+```{r}
+cv.lasso <- cv.glmnet(X_Train, Y_Train, family='binomial', alpha=1, parallel=TRUE, standardize=TRUE, type.measure='auc')
+
+plot(cv.lasso)
+coef(cv.lasso, s=cv.lasso$lambda.min)
+```
+
+### Comparación modelo Lasso vs Ridge
+Coeficiente AUC Ridge
+```{r}
+max(cv.ridge$cvm)
+```
+Coeficiente AUC Lasso
+```{r}
+max(cv.lasso$cvm)
+```
+
+```{r}
+max(cv.ridge$cvm) - max(cv.lasso$cvm)
+```
+Ambos valores parecen que dan el mismo resultado, pero Ridge da un ajuste ligeramente mejor.
+
+###  TEST 
+Se prueba el modelo de regresión logística usando la regularización de Ridge para ver su utilidad:
+
+```{r}
+y_pred <- as.numeric(predict.glmnet(cv.ridge$glmnet.fit, newx=X_Test, s=cv.ridge$lambda.min)>.5)
+
+y_pred
+```
+Ahora, se crea una matriz de confusión para poder comparar el resultado real y el resultado previsto:
+```{r}
+conf_matrix <- confusionMatrix(as.factor(Y_Test), as.factor(y_pred), mode="everything", positive = "0")
+conf_matrix
+```
+Disponemos de un modelo con una Accuracy del 90%, y Recall del 91,30%, F1 de 94,38% y Precision del 97,67%.
+
+```{r}
+cTab    <- table(Y_Test, y_pred)    # Confusion Matrix
+addmargins(cTab)
+```
+En la matriz de confusión solo tuvimos dos falsos positivos de 100 predicciones, 6 se aprobaron correctamente y 84 se denegaron correctamente. También tuvimos 8 falsos negativos.
+
+# 5. Aporta los *log odds* de las variables predictoras sobre la variable objetivo.
+
+**Variables tienen más influencia en nuestro modelo:**
+```{r}
+coef(cv.ridge, s=cv.ridge$lambda.min)
+```
+Las variables siguientes se correlacionan positivamente: PriorDefaul_No, Ethnicity_n, Citizen_p. Mientras que tener un "EducationLevel_ff" y estar desempleado ("Employed_Unemployed") tienen mayor impacto negativo a la hora de aprobar un crédito.
+
+#### Tabla log odds:
+```{r}
+exp(coef(cv.ridge, s=cv.ridge$lambda.min))
+```
+
+#### Conclusiones:
+
+El factor que más influyen es PriorDefault_no aumenta hasta un 753,4% la probalidad de obtener un préstamo, seguidamente se encuentra la variable Ethnicity_n que aumenta un 459,7%. Y las variables que influyen negativamente serían 48,2% (EducationLevel_ff) y 47,2 (Employed_Unemployed).
+
+#6. Si por cada verdadero positivo ganamos 100e y por cada falso positivo perdemos 20e. ¿Qué valor monetario generará el modelo teniendo en cuénta la matriz de confusión del modelo con mayor AUC (con las métricas en test)?
+  
+  
+```{r}
+sensibilidad <- round(conf_matrix$byClass["Sensitivity"], 3)
+especificidad <- round(conf_matrix$byClass["Specificity"], 3)
+rent_esp <- sensibilidad*100 - especificidad*20
+rent_esp
+```
+
+## **La rentabilidad esperada es de rent_esp 74.26€ por cada caso.**
+
